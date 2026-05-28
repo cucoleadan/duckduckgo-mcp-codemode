@@ -1,0 +1,49 @@
+{
+  "name": "duckduckgo-mcp-codemode",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "tsc --project tsconfig.worker.json && esbuild build/worker/worker/index-worker.js --bundle --format=esm --outfile=dist/worker.js --platform=browser --target=es2022 --external:node:* --external:cloudflare:* --external:@cfworker/json-schema --minify",
+    "dev": "npm run build && wrangler dev",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "duckduckgo",
+    "mcp",
+    "model-context-protocol",
+    "codemode",
+    "cloudflare",
+    "workers",
+    "search",
+    "web-search",
+    "content-fetching",
+    "ai-agent",
+    "llm"
+  ],
+  "author": "chillibot-chillital",
+  "license": "MIT",
+  "description": "DuckDuckGo MCP server on Cloudflare Workers with Codemode — LLMs compose multi-step web search and content fetching as JavaScript code in a secure sandbox.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cucoleadan/duckduckgo-mcp-codemode.git"
+  },
+  "homepage": "https://github.com/cucoleadan/duckduckgo-mcp-codemode#readme",
+  "bugs": {
+    "url": "https://github.com/cucoleadan/duckduckgo-mcp-codemode/issues"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260520.1",
+    "esbuild": "^0.28.0",
+    "typescript": "^5.7.2",
+    "wrangler": "^4.24.0"
+  },
+  "dependencies": {
+    "@cloudflare/codemode": "^0.3.7",
+    "@modelcontextprotocol/sdk": "^1.4.0",
+    "zod": "^3.25.67"
+  }
+}
