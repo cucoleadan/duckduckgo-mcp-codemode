@@ -6,29 +6,17 @@ import { z } from "zod";
 
 interface Env {
   LOADER: any;
+  BROWSER: any;
 }
 
 const SERVER_NAME = "ddg-search-codemode";
-const SERVER_VERSION = "1.0.0";
+const SERVER_VERSION = "1.1.0";
 
-const DDG_HTML_URL = "https://html.duckduckgo.com/html";
+const DDG_HTML_URL = "https://html.duckduckgo.com/html/";
 const DDG_HEADERS: Record<string, string> = {
   "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
 };
-
-const CLOUDFLARE_BODY_SIGNALS = [
-  "cf-mitigated",
-  "Just a moment...",
-  "Enable JavaScript and cookies to continue",
-  "Checking your browser before accessing",
-];
-
-function isCloudflareChallenge(html: string): boolean {
-  if (!html) return false;
-  const sample = html.slice(0, 4096);
-  return CLOUDFLARE_BODY_SIGNALS.some((sig) => sample.includes(sig));
-}
 
 function cleanRedirectUrl(link: string): string {
   if (link.startsWith("//duckduckgo.com/l/?uddg=")) {
@@ -49,7 +37,7 @@ interface SearchHit {
   position: number;
 }
 
-function parseDDGResults(html: string, maxResults: number): SearchHit[] {
+function parseDDGHtmlResults(html: string, maxResults: number): SearchHit[] {
   const results: SearchHit[] = [];
 
   const resultRegex = /<div[^>]*class="result[^"]*"[^>]*>([\s\S]*?)<\/div>\s*<\/div>\s*<\/div>/g;
@@ -80,6 +68,66 @@ function parseDDGResults(html: string, maxResults: number): SearchHit[] {
       title,
       url: link,
       snippet,
+      position: results.length + 1,
+    });
+  }
+
+  return results;
+}
+
+function parseDDGLiteResults(html: string, maxResults: number): SearchHit[] {
+  const results: SearchHit[] = [];
+
+  const rowRegex = /<tr[^>]*>([\s\S]*?)<\/tr>/g;
+  let rowMatch: RegExpExecArray | null;
+
+  while ((rowMatch = rowRegex.exec(html)) !== null && results.length < maxResults) {
+    const row = rowMatch[1];
+
+    const linkMatch = row.match(/<a[^>]*class="result-link"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/);
+    if (!linkMatch) continue;
+
+    let link = linkMatch[1];
+    if (link.includes("y.js") || link.includes("uddg")) link = cleanRedirectUrl(link);
+    if (!link.startsWith("http")) continue;
+
+    const title = linkMatch[2].replace(/<[^>]+>/g, "").trim();
+    if (!title) continue;
+
+    const snippetMatch = row.match(/<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/);
+    const snippet = snippetMatch
+      ? snippetMatch[1].replace(/<[^>]+>/g, "").trim()
+      : "";
+
+    results.push({
+      title,
+      url: link,
+      snippet,
+      position: results.length + 1,
+    });
+  }
+
+  if (results.length > 0) return results;
+
+  const anchorRegex = /<a[^>]*href="(https?:\/\/[^"]*)"[^>]*>([\s\S]*?)<\/a>/g;
+  let anchorMatch: RegExpExecArray | null;
+  const seen = new Set<string>();
+
+  while ((anchorMatch = anchorRegex.exec(html)) !== null && results.length < maxResults) {
+    const url = anchorMatch[1];
+    if (seen.has(url)) continue;
+    seen.add(url);
+
+    if (url.includes("duckduckgo.com")) continue;
+    if (url.includes("y.js")) continue;
+
+    const title = anchorMatch[2].replace(/<[^>]+>/g, "").trim();
+    if (!title) continue;
+
+    results.push({
+      title,
+      url,
+      snippet: "",
       position: results.length + 1,
     });
   }
@@ -119,7 +167,21 @@ function stripHtml(html: string): string {
   return text;
 }
 
-function createUpstreamMcpServer(): McpServer {
+async function browserSearch(query: string, region: string, maxResults: number, browser: any): Promise<SearchHit[]> {
+  const b = await browser.launch();
+  try {
+    const page = await b.newPage();
+    const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}${region ? `&kl=${region}` : ""}&ia=web`;
+    await page.goto(searchUrl, { waitUntil: "networkidle0", timeout: 15000 });
+    await page.waitForSelector('[data-result]', { timeout: 10000 }).catch(() => {});
+    const html = await page.content();
+    return parseDDGHtmlResults(html, maxResults);
+  } finally {
+    await b.close();
+  }
+}
+
+function createUpstreamMcpServer(env: Env): McpServer {
   const server = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
@@ -127,7 +189,7 @@ function createUpstreamMcpServer(): McpServer {
 
   server.tool(
     "search",
-    "Search the web using DuckDuckGo. Returns a list of results with titles, URLs, and snippets. Use this to find current information, research topics, or locate specific websites. For best results, use specific and descriptive search queries.",
+    "Search the web using DuckDuckGo. Returns a list of results with titles, URLs, and snippets. Uses a headless browser to bypass bot detection. For best results, use specific and descriptive search queries.",
     {
       query: z
         .string()
@@ -149,6 +211,15 @@ function createUpstreamMcpServer(): McpServer {
     },
     async ({ query, max_results, region }) => {
       try {
+        if (env.BROWSER) {
+          const results = await browserSearch(query, region, max_results, env.BROWSER);
+          if (results.length > 0) {
+            return {
+              content: [{ type: "text", text: formatResults(results) }],
+            };
+          }
+        }
+
         const params = new URLSearchParams({
           q: query,
           b: "",
@@ -173,7 +244,19 @@ function createUpstreamMcpServer(): McpServer {
         }
 
         const html = await response.text();
-        const results = parseDDGResults(html, max_results);
+
+        if (html.includes("anomaly-modal") || html.includes("bots use DuckDuckGo")) {
+          return {
+            content: [{ type: "text", text: "DuckDuckGo returned a CAPTCHA. Try again in a few minutes, or enable the BROWSER binding for headless browser search." }],
+            isError: true,
+          };
+        }
+
+        let results = parseDDGHtmlResults(html, max_results);
+        if (results.length === 0) {
+          results = parseDDGLiteResults(html, max_results);
+        }
+
         return {
           content: [{ type: "text", text: formatResults(results) }],
         };
@@ -276,6 +359,7 @@ export default {
           server: SERVER_NAME,
           version: SERVER_VERSION,
           codemode: true,
+          browser: !!env.BROWSER,
         }),
         { headers: { "Content-Type": "application/json" } }
       );
@@ -289,7 +373,7 @@ export default {
     }
 
     if (path === "/mcp" && request.method === "POST") {
-      const upstreamServer = createUpstreamMcpServer();
+      const upstreamServer = createUpstreamMcpServer(env);
       const executor = new DynamicWorkerExecutor({
         loader: env.LOADER,
       });
@@ -297,7 +381,7 @@ export default {
       const codemodeServer = await codeMcpServer({
         server: upstreamServer,
         executor,
-        description: `DuckDuckGo web search + content fetching toolchain.
+        description: `DuckDuckGo web search + content fetching toolchain.${env.BROWSER ? " Search uses a headless browser to bypass bot detection." : " Note: DuckDuckGo may CAPTCHA-block search from datacenter IPs. Enable BROWSER binding for reliable search."}
 
 Tools available via codemode.*:
   search(query: string, max_results?: number, region?: string) - DuckDuckGo web search

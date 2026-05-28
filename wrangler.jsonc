@@ -6,6 +6,11 @@
   "compatibility_flags": ["nodejs_compat"],
   "minify": true,
   "observability": { "enabled": true },
+  "browser": [
+    {
+      "binding": "BROWSER"
+    }
+  ],
   "worker_loaders": [
     {
       "binding": "LOADER"
