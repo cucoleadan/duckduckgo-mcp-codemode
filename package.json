@@ -1,6 +1,6 @@
 {
   "name": "duckduckgo-mcp-codemode",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "scripts": {
     "build": "tsc --project tsconfig.worker.json && esbuild build/worker/worker/index-worker.js --bundle --format=esm --outfile=dist/worker.js --platform=browser --target=es2022 --external:node:* --external:cloudflare:* --minify",
@@ -44,6 +44,7 @@
   "dependencies": {
     "@cfworker/json-schema": "^4.1.1",
     "@cloudflare/codemode": "^0.3.7",
+    "@cloudflare/puppeteer": "^1.1.0",
     "@modelcontextprotocol/sdk": "^1.4.0",
     "zod": "^3.25.67"
   }

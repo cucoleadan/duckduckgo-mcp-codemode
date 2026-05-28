@@ -2,6 +2,7 @@ import { codeMcpServer } from "@cloudflare/codemode/mcp";
 import { DynamicWorkerExecutor } from "@cloudflare/codemode";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
+import puppeteer from "@cloudflare/puppeteer";
 import { z } from "zod";
 
 interface Env {
@@ -168,7 +169,7 @@ function stripHtml(html: string): string {
 }
 
 async function browserSearch(query: string, region: string, maxResults: number, browser: any): Promise<SearchHit[]> {
-  const b = await browser.launch();
+  const b = await puppeteer.launch(browser);
   try {
     const page = await b.newPage();
     const searchUrl = `https://duckduckgo.com/?q=${encodeURIComponent(query)}${region ? `&kl=${region}` : ""}&ia=web`;
